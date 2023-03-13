@@ -1,6 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from keras.utils import plot_model
+import pandas as pd
 
 from tensorflow.keras import utils
 from tensorflow.keras.models import Sequential  # Полносвязная модель
@@ -150,6 +150,9 @@ def recognizeMultiClass(model, xTest, modelName, className):
 
     return totalSumRec / sumCount
 
+# Создаем функцию, которая отключает блоки по индексу размером окна window
+def block_off(X, i, window):
+    return np.where((i*window < X) & (X <= (i+1)*window), 1, X)
 
 
 
@@ -190,7 +193,7 @@ for i in className:
 # # Преобразовываем текстовые данные в числовые/векторные для обучения нейросетью
 # #################
 
-maxWordsCount = 100000 # определяем макс.кол-во слов/индексов, учитываемое при обучении текстов
+maxWordsCount = 50000 # определяем макс.кол-во слов/индексов, учитываемое при обучении текстов
 
 # для этого воспользуемся встроенной в Keras функцией Tokenizer для разбиения текста и превращения в матрицу числовых значений
 tokenizer = Tokenizer(num_words=maxWordsCount, filters='–—!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~\t\n\xa0–\ufeff', lower=True, split=' ', char_level=False, oov_token = 'unknown')
@@ -206,10 +209,6 @@ print("Done!")
 # преобразовываем текст в последовательность индексов согласно частотному словарю
 trainWordIndexes = tokenizer.texts_to_sequences(trainText) # обучающие тесты в индексы
 testWordIndexes = tokenizer.texts_to_sequences(testText)   # проверочные тесты в индексы
-# берем первые numOfWords слов
-numOfWords = 50000
-trainWordIndexes = trainWordIndexes[0:numOfWords]
-testWordIndexes = testWordIndexes[0:numOfWords]
 # Задаём базовые параметры
 xLen = 65 # Длина отрезка текста, по которой анализируем, в словах
 step = 1 # Шаг разбиения исходного текста на обучающие вектора
@@ -247,22 +246,70 @@ with device("/device:CPU:0"):
 
     model.summary() # Выводим summary модели
 
-    # history = model.fit(x_train,
-    #                 y_train,
-    #                 epochs=100,
-    #                 batch_size=512,
-    #                 validation_data=(x_test, y_test))
-    #
-    # pred = recognizeMultiClass(model, xTest6Classes, "EmbAndSimpDense", list(className)) #функция покажет какие классы и как распознаны верно
+    history = model.fit(x_train,
+                    y_train,
+                    epochs=100,
+                    batch_size=512,
+                    validation_data=(x_test, y_test))
 
-xTest6Classes01, xTest6Classes = createTestMultiClasses(testWordIndexes, 100, 100)  # подгоним форму тестовых классов под функцию recognizeMultiClass
-print(xTest6Classes)
+    pred = recognizeMultiClass(model, xTest6Classes, "EmbAndSimpDense", list(className)) #функция покажет какие классы и как распознаны верно
+# Запоминаем точность, с которой будем сравнивать наши блоки
+normal_accuracy = model.evaluate(x_test, y_test)[1]
+print("Normal accuracy: " + str(normal_accuracy))
+window = 100  # Задаем размер блока отключаемых токенов
+data = []  # Заготовка для таблицы точности модели
+for i in range(maxWordsCount // window):  # Проходим по всем токенам с шагом 100
 
-# plt.plot(history.history['loss'], label='Значение ошибки на обучающем наборе')
-    # plt.plot(history.history['val_loss'], label='Значение ошибки на проверочном наборе')
-    # plt.legend()
-    # plt.show()
-    # plt.plot(history.history['accuracy'], label='Точность на обучающем наборе')
-    # plt.plot(history.history['val_accuracy'], label='Точность на проверочном наборе')
-    # plt.legend()
-    # plt.show()
+    print(i, '===' * 30)
+    x_testST2 = block_off(X=x_test, i=i, window=window)  # Формируем новый test с отключенными токенами
+
+    scorr = model.evaluate(x_testST2, y_test)[1]
+
+    data += [[round(scorr, 3)]]
+
+data_1 = pd.DataFrame(data) # DF индекс блока и точность
+data_del = data_1.index[data_1[0] > normal_accuracy] # Отбираем только те индексы блоков, которые хотим отключить
+
+ind_off = []                # Токены, которые нужно отключить
+for i in data_del:        # Проходим по индексам блоков
+    ind_off.extend(range(i*window, (i+1)*window))  # Добавляем токены, которые будем отключать
+print("Tokens to turn off: "+str(ind_off))
+train = x_train.copy()
+for i in ind_off: # Проходим по списку токенов, которые нужно заменить на 1
+    train = np.where(train == i, 1, train) # Формируем новый train
+
+with device("/device:CPU:0"):
+    model = Sequential()
+    model.add(Embedding(maxWordsCount, 70, input_length=xLen))
+    model.add(SpatialDropout1D(0.3))
+    model.add(BatchNormalization())
+    model.add(Bidirectional(
+        LSTM(8, return_sequences=True)))  # добавляем слой с двунаправленным LSTM, совместимый с Cuda при поддержке GPU
+    model.add(Bidirectional(
+        LSTM(8, return_sequences=True)))  # добавляем слой с двунаправленным LSTM, совместимый с Cuda при поддержке GPU
+    model.add(Dropout(
+        0.3))  # добавляем слой регуляризации, "выключая" указанное количество нейронов, во избежание переобучения
+    model.add(BatchNormalization())  # добавляем слой нормализации данных
+    model.add(Flatten())
+    #model.add(Dense(600, activation='relu'))
+    model.add(Dense(300, activation='relu'))
+    model.add(Dense(100, activation='relu'))
+    model.add(Dense(nClasses, activation='softmax'))
+
+    # Компиляция, составление модели с выбором алгоритма оптимизации, функции потерь и метрики точности
+    model.compile(optimizer='rmsprop',
+                  loss='categorical_crossentropy',
+                  metrics=['accuracy'])
+
+    model.summary() # Выводим summary модели
+
+    history = model.fit(train,
+                    y_train,
+                    epochs=100,
+                    batch_size=512,
+                    validation_data=(x_test, y_test))
+
+test_accuracy = model.evaluate(x_test, y_test, verbose = 0)[1]
+
+print('До отключения токенов точность была', normal_accuracy)
+print('После                              ', test_accuracy)
