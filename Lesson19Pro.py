@@ -190,7 +190,7 @@ for i in className:
 # # Преобразовываем текстовые данные в числовые/векторные для обучения нейросетью
 # #################
 
-maxWordsCount = 20000 # определяем макс.кол-во слов/индексов, учитываемое при обучении текстов
+maxWordsCount = 100000 # определяем макс.кол-во слов/индексов, учитываемое при обучении текстов
 
 # для этого воспользуемся встроенной в Keras функцией Tokenizer для разбиения текста и превращения в матрицу числовых значений
 tokenizer = Tokenizer(num_words=maxWordsCount, filters='–—!"#$%&()*+,-./:;<=>?@[\\]^_`{|}~\t\n\xa0–\ufeff', lower=True, split=' ', char_level=False, oov_token = 'unknown')
@@ -206,9 +206,14 @@ print("Done!")
 # преобразовываем текст в последовательность индексов согласно частотному словарю
 trainWordIndexes = tokenizer.texts_to_sequences(trainText) # обучающие тесты в индексы
 testWordIndexes = tokenizer.texts_to_sequences(testText)   # проверочные тесты в индексы
+# берем первые numOfWords слов
+numOfWords = 50000
+trainWordIndexes = trainWordIndexes[0:numOfWords]
+testWordIndexes = testWordIndexes[0:numOfWords]
 # Задаём базовые параметры
 xLen = 65 # Длина отрезка текста, по которой анализируем, в словах
 step = 1 # Шаг разбиения исходного текста на обучающие вектора
+
 
 #create train&test sets
 x_train, y_train = createSetsMultiClasses(trainWordIndexes, xLen, step)
@@ -242,20 +247,22 @@ with device("/device:CPU:0"):
 
     model.summary() # Выводим summary модели
 
-    history = model.fit(x_train,
-                    y_train,
-                    epochs=100,
-                    batch_size=512,
-                    validation_data=(x_test, y_test))
+    # history = model.fit(x_train,
+    #                 y_train,
+    #                 epochs=100,
+    #                 batch_size=512,
+    #                 validation_data=(x_test, y_test))
+    #
+    # pred = recognizeMultiClass(model, xTest6Classes, "EmbAndSimpDense", list(className)) #функция покажет какие классы и как распознаны верно
 
-    pred = recognizeMultiClass(model, xTest6Classes, "EmbAndSimpDense", list(className)) #функция покажет какие классы и как распознаны верно
+xTest6Classes01, xTest6Classes = createTestMultiClasses(testWordIndexes, 100, 100)  # подгоним форму тестовых классов под функцию recognizeMultiClass
+print(xTest6Classes)
 
-
-    plt.plot(history.history['loss'], label='Значение ошибки на обучающем наборе')
-    plt.plot(history.history['val_loss'], label='Значение ошибки на проверочном наборе')
-    plt.legend()
-    plt.show()
-    plt.plot(history.history['accuracy'], label='Точность на обучающем наборе')
-    plt.plot(history.history['val_accuracy'], label='Точность на проверочном наборе')
-    plt.legend()
-    plt.show()
+# plt.plot(history.history['loss'], label='Значение ошибки на обучающем наборе')
+    # plt.plot(history.history['val_loss'], label='Значение ошибки на проверочном наборе')
+    # plt.legend()
+    # plt.show()
+    # plt.plot(history.history['accuracy'], label='Точность на обучающем наборе')
+    # plt.plot(history.history['val_accuracy'], label='Точность на проверочном наборе')
+    # plt.legend()
+    # plt.show()
